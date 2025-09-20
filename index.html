@@ -1,0 +1,1073 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>NTAG215 Tag Management</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=yes">
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        .btn {
+            display: inline-block;
+            padding: 10px 20px;
+            margin: 5px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            text-decoration: none;
+            font-size: 14px;
+        }
+        .btn-primary { background-color: #007bff; color: white; }
+        .btn-secondary { background-color: #6c757d; color: white; }
+        .btn-danger { background-color: #dc3545; color: white; }
+        .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+        .btn-block { display: block; width: 100%; margin: 10px 0; }
+        .well {
+            background-color: #f8f9fa;
+            border: 1px solid #dee2e6;
+            border-radius: 4px;
+            padding: 15px;
+            margin: 10px 0;
+        }
+        .slot {
+            border-left: 4px solid #007bff;
+        }
+        .slot-title {
+            font-weight: bold;
+            font-size: 18px;
+            margin-bottom: 10px;
+        }
+        .slot-summary div {
+            margin: 5px 0;
+        }
+        .slot-links {
+            list-style: none;
+            padding: 0;
+            margin: 10px 0 0 0;
+        }
+        .slot-links li {
+            display: inline-block;
+            margin-right: 10px;
+        }
+        .slot-links a {
+            color: #007bff;
+            text-decoration: none;
+            font-size: 12px;
+        }
+        .slot-links a:hover {
+            text-decoration: underline;
+        }
+        .modal {
+            display: none;
+            position: fixed;
+            z-index: 1000;
+            left: 0;
+            top: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0,0,0,0.4);
+        }
+        .modal-dialog {
+            position: relative;
+            margin: 10% auto;
+            width: 90%;
+            max-width: 500px;
+        }
+        .modal-content {
+            background-color: white;
+            border-radius: 4px;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+        }
+        .modal-header {
+            padding: 15px;
+            border-bottom: 1px solid #dee2e6;
+            background-color: #f8f9fa;
+            border-radius: 4px 4px 0 0;
+        }
+        .modal-title {
+            margin: 0;
+            font-size: 18px;
+        }
+        .modal-body {
+            padding: 15px;
+        }
+        .modal-footer {
+            padding: 15px;
+            border-top: 1px solid #dee2e6;
+            text-align: right;
+        }
+        .close {
+            float: right;
+            font-size: 24px;
+            font-weight: bold;
+            cursor: pointer;
+            background: none;
+            border: none;
+        }
+        .close:hover {
+            color: #999;
+        }
+        .connected .connect-section {
+            display: none;
+        }
+        .disconnect-section {
+            display: none;
+        }
+        .connected .disconnect-section {
+            display: block;
+        }
+        #readme {
+            margin: 20px 0;
+            padding: 15px;
+            background-color: #f8f9fa;
+            border-radius: 4px;
+        }
+        #slotsContainer {
+            margin-top: 20px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container" id="mainContainer">
+        <h1>NTAG215 Tag Management</h1>
+
+        <div class="connect-section">
+            <button class="btn btn-primary btn-block" id="puckConnect">Connect to Tag</button>
+        </div>
+
+        <div class="disconnect-section">
+            <button class="btn btn-secondary btn-block" id="puckDisconnect">Disconnect from Tag</button>
+            <button class="btn btn-secondary" id="puckUart">Enable UART</button>
+            <button class="btn btn-secondary" id="puckName">Change Name</button>
+            <button class="btn btn-secondary" id="uploadScript">Upload Script</button>
+            <button class="btn btn-secondary" id="updateFirmware">Update Firmware</button>
+        </div>
+
+        <div id="readme">
+            <h2>NTAG215 Tag Manager</h2>
+            <p>This application allows you to manage NTAG215 tags using a Puck.js device with custom firmware.</p>
+            <p>Connect your Puck.js device and manage multiple tag slots, upload/download tag data, and more.</p>
+        </div>
+
+        <div id="slotsContainer"></div>
+    </div>
+
+    <!-- Modal -->
+    <div id="alertModal" class="modal">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <button class="close">&times;</button>
+                    <h4 class="modal-title"></h4>
+                </div>
+                <div class="modal-body"></div>
+                <div class="modal-footer"></div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Constants
+        const serviceId = "78290001-d52e-473f-a9f4-f03da7c67dd1";
+        const commandCharacteristicId = "78290002-d52e-473f-a9f4-f03da7c67dd1";
+        const returnCharacteristicId = "78290003-d52e-473f-a9f4-f03da7c67dd1";
+        const nameCharacteristicId = "78290004-d52e-473f-a9f4-f03da7c67dd1";
+        const firmwareCharacteristicId = "78290005-d52e-473f-a9f4-f03da7c67dd1";
+
+        // Amiibo API integration
+        let amiiboCache = null;
+        let individualAmiiboCache = new Map(); // Cache individual lookups
+        const AMIIBO_API_BASE = 'https://amiiboapi.com/api';
+
+        // Function to load all amiibo data from API
+        async function loadAmiiboData() {
+            if (!amiiboCache) {
+                try {
+                    console.log('Loading amiibo data from AmiiboAPI...');
+                    const response = await fetch(`${AMIIBO_API_BASE}/amiibo/`);
+                    if (!response.ok) {
+                        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                    }
+                    amiiboCache = await response.json();
+                    console.log(`Loaded ${amiiboCache.amiibo.length} amiibo from API`);
+
+                    // Pre-populate individual cache with all amiibo for faster lookups
+                    if (amiiboCache.amiibo) {
+                        amiiboCache.amiibo.forEach(amiibo => {
+                            const id = amiibo.head + amiibo.tail;
+                            individualAmiiboCache.set(id, amiibo);
+                        });
+                        console.log(`Cached ${individualAmiiboCache.size} amiibo for quick lookup`);
+                    }
+                } catch (error) {
+                    console.warn('Could not load from AmiiboAPI, using fallback data:', error);
+                    // Fallback basic data matching API structure
+                    amiiboCache = {
+                        "amiibo": [
+                            {
+                                "name": "Mario",
+                                "gameSeries": "Super Mario",
+                                "amiiboSeries": "Super Smash Bros.",
+                                "type": "Figure",
+                                "head": "00000000",
+                                "tail": "00000002",
+                                "image": "https://raw.githubusercontent.com/N3evin/AmiiboAPI/master/images/icon_00000000-00000002.png"
+                            }
+                        ]
+                    };
+                    // Cache fallback data too
+                    amiiboCache.amiibo.forEach(amiibo => {
+                        const id = amiibo.head + amiibo.tail;
+                        individualAmiiboCache.set(id, amiibo);
+                    });
+                }
+            }
+            return amiiboCache;
+        }
+
+        // Function to lookup specific amiibo by ID (with caching)
+        async function getAmiiboById(id) {
+            // Check individual cache first
+            if (individualAmiiboCache.has(id)) {
+                console.log(`Found amiibo ${id} in cache`);
+                return individualAmiiboCache.get(id);
+            }
+
+            try {
+                console.log(`Looking up amiibo with ID: ${id} via API`);
+                const response = await fetch(`${AMIIBO_API_BASE}/amiibo/?id=${id}`);
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                }
+                const data = await response.json();
+                const amiibo = data.amiibo && data.amiibo.length > 0 ? data.amiibo[0] : null;
+
+                if (amiibo) {
+                    // Cache the result
+                    individualAmiiboCache.set(id, amiibo);
+                    console.log(`Cached amiibo ${id}: ${amiibo.name}`);
+                }
+
+                return amiibo;
+            } catch (error) {
+                console.warn(`Failed to lookup amiibo ${id}:`, error);
+                // Try to load all data and find it there
+                await loadAmiiboData();
+                return individualAmiiboCache.get(id) || null;
+            }
+        }
+
+        // Global variables
+        let modalResolve, modalReject;
+        let modalShowing = false;
+
+        // Browser check functions
+        function isAppleDevice() {
+            return /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
+        }
+
+        function isChrome() {
+            return navigator.userAgent.indexOf("Chrome") >= 0;
+        }
+
+        function isFirefox() {
+            return navigator.userAgent.indexOf("Firefox") >= 0;
+        }
+
+        function isLinux() {
+            return navigator.userAgent.indexOf("Linux") >= 0;
+        }
+
+        const supportsBluetooth = (() => {
+            if (typeof navigator === "undefined") {
+                return "Not running in a browser";
+            }
+
+            if (!navigator.bluetooth) {
+                if (isAppleDevice()) {
+                    return 'Safari on iOS has no Web Bluetooth support. You need to use <a href="https://apps.apple.com/us/app/bluefy-web-ble-browser/id1492822055" target="_blank">Bluefy – Web BLE Browser</a>';
+                } else if (isChrome() && isLinux()) {
+                    return "Chrome on Linux requires chrome://flags/#enable-experimental-web-platform-features to be enabled.";
+                } else if (isFirefox()) {
+                    return "Firefox doesn't support Web Bluetooth - try using Chrome";
+                } else {
+                    return "No navigator.bluetooth. Do you have a supported browser?";
+                }
+            }
+
+            return true;
+        })();
+
+        async function bluetoothOrError() {
+            if (supportsBluetooth !== true ||
+                (navigator.bluetooth && navigator.bluetooth.getAvailability &&
+                 await navigator.bluetooth.getAvailability() !== true)) {
+                throw new Error("Bluetooth is not currently available.");
+            }
+            return true;
+        }
+
+        // File helper functions
+        function saveData(data, fileName = "file.bin", mimeType = "application/octet-stream") {
+            const blob = new Blob([data], { type: mimeType });
+            const url = window.URL.createObjectURL(blob);
+
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = fileName;
+            document.body.appendChild(a);
+            a.style.display = 'none';
+            a.click();
+            a.remove();
+
+            setTimeout(() => window.URL.revokeObjectURL(url), 1000);
+        }
+
+        function readFile(maxSize = 572) {
+            return new Promise((resolve, reject) => {
+                const input = document.createElement("input");
+                input.type = "file";
+                document.body.appendChild(input);
+                input.style.display = 'none';
+
+                input.addEventListener("change", () => {
+                    const files = input.files;
+                    if (files.length > 0) {
+                        const file = files[0];
+                        if (file.size <= maxSize) {
+                            const reader = new FileReader();
+                            reader.addEventListener('load', (e) => {
+                                resolve({
+                                    filename: file.name,
+                                    size: file.size,
+                                    data: new Uint8Array(e.target.result)
+                                });
+                            });
+                            reader.readAsArrayBuffer(file);
+                        } else {
+                            reject(new Error(`File is too large: ${file.size} bytes`));
+                        }
+                    } else {
+                        reject(new Error("No file selected"));
+                    }
+                    input.remove();
+                });
+
+                input.addEventListener("cancel", () => {
+                    reject(new Error("File selection cancelled"));
+                    input.remove();
+                });
+
+                // Trigger file picker immediately
+                input.click();
+            });
+        }
+
+        // NTAG215 functions
+        function getBlankNtag() {
+            const tag = new Uint8Array(572);
+            tag[0] = 0x04;
+            tag[1] = Math.round(Math.random() * 255);
+            tag[2] = Math.round(Math.random() * 255);
+            tag[3] = tag[0] ^ tag[1] ^ tag[2] ^ 0x88;
+            tag[4] = Math.round(Math.random() * 255);
+            tag[5] = Math.round(Math.random() * 255);
+            tag[6] = Math.round(Math.random() * 255);
+            tag[7] = Math.round(Math.random() * 255);
+            tag[8] = tag[4] ^ tag[5] ^ tag[6] ^ tag[7];
+
+            tag.set([0x48, 0x00, 0x00, 0xE1, 0x10, 0x3E, 0x00, 0x03, 0x00, 0xFE], 0x09);
+            tag.set([0xBD, 0x04, 0x00, 0x00, 0xFF, 0x00, 0x05], 0x20B);
+
+            return tag;
+        }
+
+        // Modal functions
+        function showModal(options) {
+            return new Promise((resolve, reject) => {
+                modalResolve = resolve;
+                modalReject = reject;
+                modalShowing = true;
+
+                const modal = document.getElementById('alertModal');
+                const title = modal.querySelector('.modal-title');
+                const body = modal.querySelector('.modal-body');
+                const footer = modal.querySelector('.modal-footer');
+
+                title.textContent = options.title || '';
+
+                if (typeof options.message === 'string') {
+                    if (options.htmlEscapeBody === false) {
+                        body.innerHTML = options.message;
+                    } else {
+                        body.textContent = options.message;
+                    }
+                } else {
+                    body.innerHTML = '';
+                    body.appendChild(options.message);
+                }
+
+                footer.innerHTML = '';
+                if (options.buttons && options.buttons.length > 0) {
+                    options.buttons.forEach(button => {
+                        const btn = document.createElement('button');
+                        btn.className = 'btn btn-primary';
+                        btn.textContent = button.label;
+                        btn.onclick = () => {
+                            hideModal();
+                            resolve(button.value);
+                        };
+                        footer.appendChild(btn);
+                    });
+                } else if (!options.preventClose) {
+                    // Auto-resolve for non-dialog modals
+                    setTimeout(() => resolve(0), 50);
+                }
+
+                modal.style.display = 'block';
+            });
+        }
+
+        // Non-blocking version for progress indicators
+        function showProgressModal(options) {
+            modalShowing = true;
+
+            const modal = document.getElementById('alertModal');
+            const title = modal.querySelector('.modal-title');
+            const body = modal.querySelector('.modal-body');
+            const footer = modal.querySelector('.modal-footer');
+
+            title.textContent = options.title || '';
+
+            if (typeof options.message === 'string') {
+                if (options.htmlEscapeBody === false) {
+                    body.innerHTML = options.message;
+                } else {
+                    body.textContent = options.message;
+                }
+            } else {
+                body.innerHTML = '';
+                body.appendChild(options.message);
+            }
+
+            footer.innerHTML = '';
+            modal.style.display = 'block';
+        }
+
+        function hideModal() {
+            const modal = document.getElementById('alertModal');
+            modal.style.display = 'none';
+            modalShowing = false;
+            if (modalResolve) {
+                modalResolve(0);
+                modalResolve = null;
+                modalReject = null;
+            }
+        }
+
+        function setModal(options) {
+            if (modalShowing) {
+                const modal = document.getElementById('alertModal');
+                const title = modal.querySelector('.modal-title');
+                const body = modal.querySelector('.modal-body');
+
+                if (options.title) {
+                    title.textContent = options.title;
+                }
+                if (options.message) {
+                    if (typeof options.message === 'string') {
+                        body.textContent = options.message;
+                    } else {
+                        body.innerHTML = '';
+                        body.appendChild(options.message);
+                    }
+                }
+            }
+        }
+
+        // Command constants
+        const Commands = {
+            SlotInformation: 0x01,
+            Read: 0x02,
+            Write: 0x03,
+            SaveSlot: 0x04,
+            MoveSlot: 0xFD,
+            EnableUart: 0xFE,
+            RestartNFC: 0xFF
+        };
+
+        // Puck class
+        class Puck {
+            constructor() {
+                this.device = null;
+                this.server = null;
+                this.service = null;
+                this.commandCharacteristic = null;
+                this.returnCharacteristic = null;
+                this.nameCharacteristic = null;
+                this.firmwareCharacteristic = null;
+                this.totalSlots = 0;
+                this._firmwareName = '';
+            }
+
+            get isConnected() {
+                return this.server && this.server.connected;
+            }
+
+            get firmwareName() {
+                return this._firmwareName;
+            }
+
+            async connect(disconnectCallback) {
+                if (this.isConnected) {
+                    await this.disconnect();
+                }
+
+                console.log('Requesting Bluetooth Device...');
+                this.device = await navigator.bluetooth.requestDevice({
+                    filters: [{ services: [serviceId] }]
+                });
+
+                if (disconnectCallback) {
+                    this.device.addEventListener("gattserverdisconnected", disconnectCallback);
+                }
+
+                console.log('Connecting to GATT Server...');
+                this.server = await this.device.gatt.connect();
+
+                console.log('Getting Puck Service...');
+                this.service = await this.server.getPrimaryService(serviceId);
+
+                console.log('Getting Command Characteristic...');
+                this.commandCharacteristic = await this.service.getCharacteristic(commandCharacteristicId);
+
+                console.log('Getting Return Characteristic...');
+                this.returnCharacteristic = await this.service.getCharacteristic(returnCharacteristicId);
+
+                console.log('Getting Name Characteristic...');
+                this.nameCharacteristic = await this.service.getCharacteristic(nameCharacteristicId);
+
+                try {
+                    console.log('Getting Firmware Characteristic...');
+                    this.firmwareCharacteristic = await this.service.getCharacteristic(firmwareCharacteristicId);
+                    const firmwareData = await this.firmwareCharacteristic.readValue();
+                    this._firmwareName = new TextDecoder().decode(firmwareData);
+                } catch (noFirmwareError) {
+                    // Firmware characteristic might not exist
+                }
+
+                console.log('Getting slot information...');
+                const info = await this.getSlotInformation();
+                this.totalSlots = info.totalSlots;
+
+                console.log('Connected!');
+            }
+
+            async disconnect() {
+                if (this.isConnected) {
+                    console.log('Disconnecting...');
+                    await this.server.disconnect();
+                }
+
+                this.device = null;
+                this.server = null;
+                this.service = null;
+                this.commandCharacteristic = null;
+                this.returnCharacteristic = null;
+                this.nameCharacteristic = null;
+                this.firmwareCharacteristic = null;
+                this._firmwareName = '';
+            }
+
+            async getSlotInformation() {
+                const command = [Commands.SlotInformation];
+                console.log("Reading slot information...");
+
+                await this.commandCharacteristic.writeValueWithResponse(Uint8Array.from(command));
+                const response = new Uint8Array((await this.returnCharacteristic.readValue()).buffer);
+
+                return {
+                    currentSlot: response[1],
+                    totalSlots: response[2]
+                };
+            }
+
+            async readSlotSummary(slot) {
+                if (!this.isConnected) {
+                    throw new Error("Puck is not connected");
+                }
+
+                if (slot >= 0 && slot < this.totalSlots) {
+                    console.log(`Reading slot ${slot} summary...`);
+
+                    const command = [Commands.SlotInformation, slot];
+                    await this.commandCharacteristic.writeValueWithResponse(Uint8Array.from(command));
+
+                    while (true) {
+                        const response = await this.returnCharacteristic.readValue();
+                        const responseArray = new Uint8Array(response.buffer);
+
+                        if (responseArray.length === 82 && command[0] === responseArray[0] && command[1] === responseArray[1]) {
+                            return responseArray.slice(2);
+                        }
+                    }
+                } else {
+                    throw new Error(`Invalid slot: ${slot}`);
+                }
+            }
+
+            async _read(slot, startPage, count) {
+                const command = [Commands.Read, slot, startPage, count];
+
+                console.log(`Reading slot ${slot}, page ${startPage} through ${startPage + count}...`);
+
+                await this.commandCharacteristic.writeValueWithResponse(Uint8Array.from(command));
+                while (true) {
+                    const response = await this.returnCharacteristic.readValue();
+                    const responseArray = new Uint8Array(response.buffer);
+
+                    if (responseArray[0] === command[0] &&
+                        responseArray[1] === command[1] &&
+                        responseArray[2] === command[2] &&
+                        responseArray[3] === command[3]) {
+                        return responseArray.slice(4);
+                    }
+                }
+            }
+
+            async readSlot(slot) {
+                if (!this.isConnected) {
+                    throw new Error("Puck is not connected");
+                }
+
+                if (slot >= 0 && slot < this.totalSlots) {
+                    console.log(`Reading slot ${slot}...`);
+                    const data = new Uint8Array(572);
+
+                    for (let page = 0; page < 143; page += 15) {
+                        const count = Math.min(15, 143 - page);
+                        const pageData = await this._read(slot, page, count);
+                        data.set(pageData, page * 4);
+                    }
+
+                    return data;
+                } else {
+                    throw new Error(`Invalid slot: ${slot}`);
+                }
+            }
+
+            async writeSlot(slot, data) {
+                if (!this.isConnected) {
+                    throw new Error("Puck is not connected");
+                }
+
+                if (slot >= 0 && slot < this.totalSlots) {
+                    console.log(`Writing slot ${slot}...`);
+
+                    const command = new Uint8Array(19);
+
+                    for (let i = 0; i < data.length; i += 16) {
+                        const dataSlice = data.slice(i, i + 16);
+                        command[0] = Commands.Write;
+                        command[1] = slot;
+                        command[2] = i / 4;
+                        command.set(dataSlice, 3);
+
+                        console.log(`Writing to slot ${slot}, page ${command[2]} for ${dataSlice.length} bytes...`);
+                        await this.commandCharacteristic.writeValueWithResponse(command);
+                    }
+
+                    await this.restartNfc(slot);
+                } else {
+                    throw new Error(`Invalid slot: ${slot}`);
+                }
+            }
+
+            async changeSlot(slot) {
+                if (!this.isConnected) {
+                    throw new Error("Puck is not connected");
+                }
+
+                if (slot >= 0 && slot < this.totalSlots) {
+                    console.log(`Changing to slot ${slot}...`);
+                    await this.restartNfc(slot);
+                } else {
+                    throw new Error(`Invalid slot: ${slot}`);
+                }
+            }
+
+            async restartNfc(slot) {
+                const command = [Commands.RestartNFC];
+
+                if (slot != null) {
+                    console.log(`Restarting NFC with slot ${slot}`);
+
+                    if (slot >= 0 && slot < this.totalSlots) {
+                        command.push(slot);
+                    } else {
+                        throw new Error(`Invalid slot: ${slot}`);
+                    }
+                } else {
+                    console.log("Restarting NFC with current slot");
+                }
+
+                await this.commandCharacteristic.writeValueWithResponse(Uint8Array.from(command));
+            }
+
+            async getName() {
+                if (!this.isConnected) {
+                    throw new Error("Puck is not connected");
+                }
+
+                const nameBytes = await this.nameCharacteristic.readValue();
+                return new TextDecoder().decode(nameBytes);
+            }
+
+            async setName(name) {
+                if (!this.isConnected) {
+                    throw new Error("Puck is not connected");
+                }
+
+                const nameBytes = new TextEncoder().encode(name);
+                await this.nameCharacteristic.writeValueWithResponse(nameBytes);
+            }
+
+            async enableUart() {
+                if (!this.isConnected) {
+                    throw new Error("Puck is not connected");
+                }
+
+                const command = [Commands.EnableUart];
+                console.log("Enabling UART...");
+                await this.commandCharacteristic.writeValueWithResponse(Uint8Array.from(command));
+            }
+        }
+
+        // Utility functions
+        function array2hex(data) {
+            return Array.prototype.map.call(data, (e) => ("00" + e.toString(16)).slice(-2)).join("");
+        }
+
+        async function getSlotElement(slot, summary) {
+            const id = array2hex(summary.slice(40, 44)) + array2hex(summary.slice(44, 48));
+            let name = "Unknown";
+            let gameseries = "Unknown";
+            let amiiboseries = "Unknown";
+            let type = "Unknown";
+            let image = "";
+
+            if (id !== "0000000000000000") {
+                try {
+                    const found = await getAmiiboById(id);
+                    if (found) {
+                        name = found.name;
+                        gameseries = found.gameSeries;
+                        amiiboseries = found.amiiboSeries;
+                        type = found.type;
+                        image = found.image;
+                    }
+                } catch (error) {
+                    console.warn(`Failed to lookup amiibo for slot ${slot}:`, error);
+                }
+            }
+
+            const element = document.createElement('div');
+            element.className = 'well slot';
+            element.innerHTML = `
+                <div class="slot-title">Slot ${slot + 1}</div>
+                <div class="slot-summary">
+                    ${id ? `<div><b>ID:</b> ${id}</div>` : ''}
+                    ${name ? `<div><b>Name:</b> ${name}</div>` : ''}
+                    ${gameseries ? `<div><b>Game Series:</b> ${gameseries}</div>` : ''}
+                    ${amiiboseries ? `<div><b>Amiibo Series:</b> ${amiiboseries}</div>` : ''}
+                    ${type ? `<div><b>Type:</b> ${type}</div>` : ''}
+                    <ul class="slot-links">
+                        <li><a href="#" class="slot-download-link">Download</a></li>
+                        <li><a href="#" class="slot-upload-link">Upload</a></li>
+                        <li><a href="#" class="slot-clear-link">Clear</a></li>
+                        <li><a href="#" class="slot-select-link">Select</a></li>
+                    </ul>
+                </div>
+            `;
+
+            // Event listeners
+            element.querySelector('.slot-download-link').addEventListener('click', async (e) => {
+                e.preventDefault();
+                try {
+                    await showModal({
+                        title: "Please Wait",
+                        message: `Reading slot ${slot + 1}`
+                    });
+                    const data = await puck.readSlot(slot);
+                    hideModal();
+                    saveData(data, `${name}.bin`);
+                } catch (error) {
+                    await showModal({
+                        title: "Error",
+                        message: error.toString()
+                    });
+                }
+            });
+
+            element.querySelector('.slot-upload-link').addEventListener('click', async (e) => {
+                e.preventDefault();
+                try {
+                    // Show non-blocking progress modal
+                    showProgressModal({
+                        title: "Please Wait",
+                        message: "Select file to upload..."
+                    });
+
+                    // Hide modal before file picker
+                    setTimeout(() => hideModal(), 50);
+
+                    const file = await readFile(572);
+                    await writeSlot(slot, file.data, element);
+                } catch (error) {
+                    if (error.message !== "File selection cancelled") {
+                        await showModal({
+                            title: "Error",
+                            message: error.toString()
+                        });
+                    }
+                }
+            });
+
+            element.querySelector('.slot-clear-link').addEventListener('click', async (e) => {
+                e.preventDefault();
+                await writeSlot(slot, getBlankNtag(), element);
+            });
+
+            element.querySelector('.slot-select-link').addEventListener('click', async (e) => {
+                e.preventDefault();
+                try {
+                    await showModal({
+                        title: "Please Wait",
+                        message: `Changing to slot ${slot + 1}`
+                    });
+                    await puck.changeSlot(slot);
+                    hideModal();
+                } catch (error) {
+                    await showModal({
+                        title: "Error",
+                        message: error.toString()
+                    });
+                }
+            });
+
+            return element;
+        }
+
+        async function writeSlot(slot, data, element) {
+            showProgressModal({
+                title: "Please Wait",
+                message: `Writing slot ${slot + 1}...`
+            });
+
+            try {
+                await puck.writeSlot(slot, data);
+
+                setModal({
+                    title: "Please Wait",
+                    message: `Updating slot ${slot + 1} display...`
+                });
+
+                await updateSlotElement(slot, element);
+                hideModal();
+            } catch (error) {
+                await showModal({
+                    title: "Error",
+                    message: `Failed to write slot ${slot + 1}: ${error.toString()}`
+                });
+            }
+        }
+
+        async function updateSlotElement(slot, oldElement) {
+            const info = await puck.readSlotSummary(slot);
+            const newElement = await getSlotElement(slot, info);
+            oldElement.parentNode.insertBefore(newElement, oldElement.nextSibling);
+            oldElement.remove();
+        }
+
+        async function populateSlots() {
+            const slotsContainer = document.getElementById('slotsContainer');
+            slotsContainer.innerHTML = '';
+
+            if (puck.isConnected) {
+                const info = await puck.getSlotInformation();
+                for (let i = 0; i < info.totalSlots; i++) {
+                    setModal({ message: `Reading Slot ${i + 1}` });
+                    const slotInfo = await puck.readSlotSummary(i);
+                    const slotElement = await getSlotElement(i, slotInfo);
+                    slotsContainer.appendChild(slotElement);
+                }
+            }
+        }
+
+        // Main application logic
+        const puck = new Puck();
+
+        async function connectPuck(e) {
+            e.preventDefault();
+            try {
+                await bluetoothOrError();
+
+                // Show non-blocking progress modal
+                showProgressModal({
+                    title: "Please Wait",
+                    message: "Requesting Bluetooth device..."
+                });
+
+                // Small delay to show the modal, then hide before native dialog
+                setTimeout(() => hideModal(), 100);
+
+                await puck.connect(async (ev) => {
+                    await disconnectPuck(ev);
+                });
+
+                if (puck.isConnected) {
+                    // Show modal while reading slots
+                    showProgressModal({
+                        title: "Please Wait",
+                        message: "Reading slot information..."
+                    });
+
+                    await populateSlots();
+                    document.getElementById('mainContainer').classList.add('connected');
+                }
+
+                hideModal();
+            } catch (error) {
+                await showModal({
+                    title: "Error",
+                    message: error.toString()
+                });
+            }
+        }
+
+        async function disconnectPuck(e) {
+            e.preventDefault();
+            try {
+                if (puck.isConnected) {
+                    await showModal({
+                        title: "Please Wait",
+                        message: "Disconnecting from puck"
+                    });
+                    await puck.disconnect();
+                }
+                document.getElementById('mainContainer').classList.remove('connected');
+                hideModal();
+            } catch (error) {
+                await showModal({
+                    title: "Error",
+                    message: error.toString()
+                });
+            }
+        }
+
+        async function enableUart(e) {
+            e.preventDefault();
+            try {
+                await showModal({
+                    title: "Please Wait",
+                    message: "Enabling UART"
+                });
+                await puck.enableUart();
+                await disconnectPuck(e);
+                hideModal();
+            } catch (error) {
+                await showModal({
+                    title: "Error",
+                    message: error.toString()
+                });
+            }
+        }
+
+        async function changeName(e) {
+            e.preventDefault();
+            try {
+                await showModal({
+                    title: "Please Wait",
+                    message: "Reading puck name"
+                });
+                const currentName = await puck.getName();
+                const newName = prompt("Enter a name", currentName);
+
+                if (newName != null) {
+                    await showModal({
+                        title: "Please Wait",
+                        message: "Setting puck name"
+                    });
+                    await puck.setName(newName);
+                }
+                hideModal();
+            } catch (error) {
+                await showModal({
+                    title: "Error",
+                    message: error.toString()
+                });
+            }
+        }
+
+        // Initialize when DOM is loaded
+        document.addEventListener('DOMContentLoaded', async () => {
+            if (supportsBluetooth !== true) {
+                showModal({
+                    title: "Unsupported Browser",
+                    message: supportsBluetooth,
+                    htmlEscapeBody: false
+                });
+            }
+
+            // Preload amiibo data in the background
+            try {
+                console.log('Preloading amiibo data...');
+                await loadAmiiboData();
+                console.log('Amiibo data preloaded successfully');
+            } catch (error) {
+                console.warn('Failed to preload amiibo data:', error);
+            }
+
+            // Event listeners
+            document.getElementById('puckConnect').addEventListener('click', connectPuck);
+            document.getElementById('puckDisconnect').addEventListener('click', disconnectPuck);
+            document.getElementById('puckUart').addEventListener('click', enableUart);
+            document.getElementById('puckName').addEventListener('click', changeName);
+
+            // Modal close functionality
+            document.querySelector('.close').addEventListener('click', hideModal);
+            document.getElementById('alertModal').addEventListener('click', (e) => {
+                if (e.target === e.currentTarget) {
+                    hideModal();
+                }
+            });
+
+            // Placeholder functions for upload script and update firmware
+            document.getElementById('uploadScript').addEventListener('click', () => {
+                showModal({
+                    title: "Not Implemented",
+                    message: "Script upload functionality needs to be implemented"
+                });
+            });
+
+            document.getElementById('updateFirmware').addEventListener('click', () => {
+                showModal({
+                    title: "Not Implemented",
+                    message: "Firmware update functionality needs to be implemented"
+                });
+            });
+        });
+    </script>
+</body>
+</html>
